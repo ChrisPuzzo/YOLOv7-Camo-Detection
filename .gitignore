@@ -186,7 +186,10 @@ app/android/
 *.log
 
 # Mobile model bundle (built per-release, don't commit)
-app/assets/models/*.tflite
+# Bundled model file ships with the app for the Beta APK so users get inference
+# out of the box. To strip a heavier model from git history later, switch to
+# EAS Update or fetch from a GitHub Release on app launch.
+# app/assets/models/*.tflite      # uncomment to keep model out of git
 app/assets/models/*.mlpackage/
 
 # OS junk

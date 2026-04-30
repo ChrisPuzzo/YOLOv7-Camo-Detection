@@ -5,6 +5,12 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#141C12"
+    },
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
@@ -15,13 +21,37 @@
     },
     "android": {
       "package": "com.chrispuzzo.camodetector.beta",
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": ["android.permission.CAMERA"],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#3A4B2F"
+      }
     },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "assetBundlePatterns": [
+      "assets/**/*",
+      "assets/models/*.tflite"
+    ],
     "plugins": [
       [
         "react-native-vision-camera",
         {
           "cameraPermissionText": "Camo Detector needs your camera to run on-device detection."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
         }
       ]
     ],
