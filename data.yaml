@@ -1,0 +1,11 @@
+# Ultralytics YOLO dataset config
+# Paths are relative to this file (the repo root).
+
+path: ./dataset
+train: images/train
+val: images/val
+test: images/test  # optional
+
+names:
+  0: camo
+  1: gun
