@@ -30,21 +30,21 @@ import { Worklets } from 'react-native-worklets-core';
 import { decodeYoloOutput, Detection } from './postprocess';
 import BoundingBoxOverlay from './BoundingBoxOverlay';
 
-const CLASS_NAMES = ['camo', 'gun'];
-const MODEL_INPUT_SIZE = 320; // must match what was set during export
-const TARGET_FPS = 8;          // run inference at ~8 FPS, render preview at 30/60
+const CLASS_NAMES = ['camo'];   // Beta = single-class. Pro will reintroduce more.
+const MODEL_INPUT_SIZE = 320;   // must match what was set during export
+const TARGET_FPS = 8;           // run inference at ~8 FPS, render preview at 30/60
 
 export default function CameraScreen() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
 
   const tfModel = useTensorflowModel(
-    require('../assets/models/camo_gun_int8.tflite')
+    require('../assets/models/camo_int8.tflite')
   );
   const model = tfModel.state === 'loaded' ? tfModel.model : undefined;
 
   const [confThreshold, setConfThreshold] = useState(0.35);
-  const [enabled, setEnabled] = useState<Record<string, boolean>>({ camo: true, gun: true });
+  const [enabled, setEnabled] = useState<Record<string, boolean>>({ camo: true });
   const [fps, setFps] = useState(0);
   const [layout, setLayout] = useState({ width: 0, height: 0 });
 
@@ -162,12 +162,9 @@ export default function CameraScreen() {
             on={enabled.camo}
             onPress={() => setEnabled((s) => ({ ...s, camo: !s.camo }))}
           />
-          <Toggle
-            label="gun"
-            color="#ef4444"
-            on={enabled.gun}
-            onPress={() => setEnabled((s) => ({ ...s, gun: !s.gun }))}
-          />
+          <View style={styles.betaBadge}>
+            <Text style={styles.betaBadgeText}>BETA</Text>
+          </View>
         </View>
         <View style={styles.row}>
           <Text style={styles.confLabel}>conf {confThreshold.toFixed(2)}</Text>
@@ -241,5 +238,19 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     fontSize: 16,
     fontWeight: '700',
+  },
+  betaBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  betaBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
 });

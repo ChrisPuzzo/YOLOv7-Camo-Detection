@@ -6,6 +6,7 @@ train: images/train
 val: images/val
 test: images/test  # optional
 
+# Single-class detector: camouflaged person.
+# v2 may reintroduce additional classes (e.g. weapon variants) behind a paid tier.
 names:
   0: camo
-  1: gun

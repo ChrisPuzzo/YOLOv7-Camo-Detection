@@ -1,27 +1,27 @@
 {
   "expo": {
-    "name": "Camo & Gun Detector",
-    "slug": "camo-gun-detector",
+    "name": "Camo Detector — Beta",
+    "slug": "camo-detector-beta",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.chrispuzzo.camogundetector",
+      "bundleIdentifier": "com.chrispuzzo.camodetector.beta",
       "infoPlist": {
-        "NSCameraUsageDescription": "We use the camera to detect camouflage and guns in the live video feed. All processing happens on your device."
+        "NSCameraUsageDescription": "We use the camera to spot camouflage in the live video feed. All processing happens on your device."
       }
     },
     "android": {
-      "package": "com.chrispuzzo.camogundetector",
+      "package": "com.chrispuzzo.camodetector.beta",
       "permissions": ["android.permission.CAMERA"]
     },
     "plugins": [
       [
         "react-native-vision-camera",
         {
-          "cameraPermissionText": "Camo & Gun Detector needs your camera to run on-device detection."
+          "cameraPermissionText": "Camo Detector needs your camera to run on-device detection."
         }
       ]
     ],
