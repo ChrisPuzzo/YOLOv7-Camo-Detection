@@ -27,6 +27,7 @@ import {
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useSharedValue } from 'react-native-reanimated';
 import { Worklets } from 'react-native-worklets-core';
+import { useResizePlugin } from 'vision-camera-resize-plugin';
 import { decodeYoloOutput, Detection } from './postprocess';
 import BoundingBoxOverlay from './BoundingBoxOverlay';
 import ErrorScreen from './ErrorScreen';
@@ -49,6 +50,11 @@ export default function CameraScreen() {
 
   // Track camera-level errors (device errors, permission revocation, etc).
   const [cameraError, setCameraError] = useState<Error | null>(null);
+
+  // Frame-resize plugin: converts a YUV/RGB Frame into a Float32 RGB tensor
+  // sized for the model. Required — passing the raw Frame to TFLite crashes
+  // the worklet thread.
+  const { resize } = useResizePlugin();
 
   const [confThreshold, setConfThreshold] = useState(0.35);
   const [enabled, setEnabled] = useState<Record<string, boolean>>({ camo: true });
@@ -76,37 +82,51 @@ export default function CameraScreen() {
 
       runAtTargetFps(TARGET_FPS, () => {
         'worklet';
-        const t0 = Date.now();
+        try {
+          const t0 = Date.now();
 
-        // VisionCamera v4: frame is YUV; we resize+normalize via the model's
-        // expected input. react-native-fast-tflite accepts a typed-array input;
-        // we use a frame-processor plugin (vision-camera-resize-plugin) in real
-        // builds. For brevity here we assume a helper `prepareInput` exists.
-        // Replace this with the actual resize plugin call in your project:
-        //   const input = resize(frame, { scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE }, pixelFormat: 'rgb', dataType: 'float32' });
-        // For now we hand the frame buffer straight to the model and let the
-        // model's input op handle it (works for many Ultralytics TFLite exports).
-        const outputs = model.runSync([frame as any]);
-        const raw = outputs[0] as unknown as Float32Array;
-        const shape = (model.outputs?.[0]?.shape as number[]) ?? [1, 4 + CLASS_NAMES.length, 0];
+          // 1. Resize + normalize the incoming Frame into a Float32 RGB tensor
+          //    of shape [MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 3], values in [0,1].
+          //    INT8-quantized models still want a float input — the TFLite
+          //    runtime quantizes internally based on the input op.
+          const input = resize(frame, {
+            scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+            pixelFormat: 'rgb',
+            dataType: 'float32',
+          });
 
-        const dets = decodeYoloOutput(raw, shape, {
-          classNames: CLASS_NAMES,
-          confThreshold,
-          iouThreshold: 0.45,
-          modelInputSize: MODEL_INPUT_SIZE,
-          displayWidth: layout.width,
-          displayHeight: layout.height,
-          enabled,
-        });
-        detectionsShared.value = dets;
-        setDetectionsJs(dets);
+          // 2. Run TFLite forward pass.
+          const outputs = model.runSync([input]);
+          const raw = outputs[0] as unknown as Float32Array;
+          const shape =
+            (model.outputs?.[0]?.shape as number[]) ??
+            [1, 4 + CLASS_NAMES.length, 0];
 
-        const dt = Date.now() - t0;
-        if (dt > 0) setFpsJs(Math.round(1000 / dt));
+          // 3. Decode YOLO output into pixel-space Detections.
+          const dets = decodeYoloOutput(raw, shape, {
+            classNames: CLASS_NAMES,
+            confThreshold,
+            iouThreshold: 0.45,
+            modelInputSize: MODEL_INPUT_SIZE,
+            displayWidth: layout.width,
+            displayHeight: layout.height,
+            enabled,
+          });
+          detectionsShared.value = dets;
+          setDetectionsJs(dets);
+
+          const dt = Date.now() - t0;
+          if (dt > 0) setFpsJs(Math.round(1000 / dt));
+        } catch (e) {
+          // Worklet exceptions silently kill the frame processor and crash the
+          // app on some devices — catch and log so the JS bridge can route the
+          // error to the ErrorBoundary on next render.
+          // eslint-disable-next-line no-console
+          console.error('[frameProcessor]', e);
+        }
       });
     },
-    [model, confThreshold, enabled, layout]
+    [model, confThreshold, enabled, layout, resize]
   );
 
   // 1. Permission gate
