@@ -11,7 +11,7 @@
       "resizeMode": "cover",
       "backgroundColor": "#141C12"
     },
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.chrispuzzo.camodetector.beta",
