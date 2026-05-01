@@ -45,6 +45,7 @@ export function decodeYoloOutput(
   shape: number[], // typically [1, 4+nc, N] or [1, N, 4+nc]
   opts: PostprocessOpts
 ): Detection[] {
+  'worklet';
   const { classNames, confThreshold, iouThreshold, modelInputSize, displayWidth, displayHeight, enabled } = opts;
   const nc = classNames.length;
   const stride = 4 + nc;
@@ -113,6 +114,7 @@ export function decodeYoloOutput(
 }
 
 function iou(a: Detection, b: Detection): number {
+  'worklet';
   const x1 = Math.max(a.x, b.x);
   const y1 = Math.max(a.y, b.y);
   const x2 = Math.min(a.x + a.w, b.x + b.w);
@@ -123,6 +125,7 @@ function iou(a: Detection, b: Detection): number {
 }
 
 function nms(dets: Detection[], iouThr: number): Detection[] {
+  'worklet';
   const sorted = [...dets].sort((a, b) => b.confidence - a.confidence);
   const keep: Detection[] = [];
   for (const d of sorted) {
