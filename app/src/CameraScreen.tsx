@@ -51,10 +51,26 @@ export default function CameraScreen() {
   // Track camera-level errors (device errors, permission revocation, etc).
   const [cameraError, setCameraError] = useState<Error | null>(null);
 
-  // Frame-resize plugin: converts a YUV/RGB Frame into a Float32 RGB tensor
+  // Track frame-processor errors. Worklet thread can’t setState directly, so
+  // we bridge through a JS callback. After N consecutive bad frames we
+  // surface the ErrorScreen instead of spamming logcat forever.
+  const [frameError, setFrameError] = useState<Error | null>(null);
+  const reportFrameErrorJs = useMemo(
+    () =>
+      Worklets.createRunOnJS((msg: string) => {
+        setFrameError(new Error(msg));
+      }),
+    []
+  );
+
+  // Frame-resize plugin: converts a YUV/RGB Frame into a uint8 RGB tensor
   // sized for the model. Required — passing the raw Frame to TFLite crashes
-  // the worklet thread.
+  // the worklet thread ("no ArrayBuffer attached").
   const { resize } = useResizePlugin();
+
+  // Worklet-side counter — stop reporting after we’ve surfaced one error so
+  // logcat doesn’t fill with the same message 8x/sec.
+  const errorReportedShared = useSharedValue(false);
 
   const [confThreshold, setConfThreshold] = useState(0.35);
   const [enabled, setEnabled] = useState<Record<string, boolean>>({ camo: true });
@@ -85,24 +101,35 @@ export default function CameraScreen() {
         try {
           const t0 = Date.now();
 
-          // 1. Resize + normalize the incoming Frame into a Float32 RGB tensor
-          //    of shape [MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 3], values in [0,1].
-          //    INT8-quantized models still want a float input — the TFLite
-          //    runtime quantizes internally based on the input op.
-          const input = resize(frame, {
+          // 1. Resize the incoming Frame into a uint8 RGB tensor of shape
+          //    [MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 3]. We use uint8 (not
+          //    float32) for two reasons:
+          //      (a) Our TFLite model is INT8-quantized — uint8 input matches
+          //          the quantization op directly, no scale conversion.
+          //      (b) Float32 output from the resize plugin produces a typed
+          //          array whose ArrayBuffer can get detached before TFLite
+          //          reads it ("no ArrayBuffer attached" worklet crash).
+          const resized = resize(frame, {
             scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
             pixelFormat: 'rgb',
-            dataType: 'float32',
+            dataType: 'uint8',
           });
 
-          // 2. Run TFLite forward pass.
+          // 2. Copy into a fresh, owned Uint8Array so the buffer stays
+          //    attached for the entire model.runSync call. This is the
+          //    canonical workaround for the "no ArrayBuffer attached" bug
+          //    in react-native-fast-tflite + vision-camera v4.
+          const input = new Uint8Array(resized.length);
+          input.set(resized);
+
+          // 3. Run TFLite forward pass.
           const outputs = model.runSync([input]);
           const raw = outputs[0] as unknown as Float32Array;
           const shape =
             (model.outputs?.[0]?.shape as number[]) ??
             [1, 4 + CLASS_NAMES.length, 0];
 
-          // 3. Decode YOLO output into pixel-space Detections.
+          // 4. Decode YOLO output into pixel-space Detections.
           const dets = decodeYoloOutput(raw, shape, {
             classNames: CLASS_NAMES,
             confThreshold,
@@ -118,11 +145,16 @@ export default function CameraScreen() {
           const dt = Date.now() - t0;
           if (dt > 0) setFpsJs(Math.round(1000 / dt));
         } catch (e) {
-          // Worklet exceptions silently kill the frame processor and crash the
-          // app on some devices — catch and log so the JS bridge can route the
-          // error to the ErrorBoundary on next render.
+          // Worklet exceptions silently kill the frame processor and on some
+          // devices crash the whole app. Catch, log once, and surface the
+          // ErrorScreen via the JS bridge.
           // eslint-disable-next-line no-console
           console.error('[frameProcessor]', e);
+          if (!errorReportedShared.value) {
+            errorReportedShared.value = true;
+            const msg = (e as Error)?.message ?? String(e);
+            reportFrameErrorJs(msg);
+          }
         }
       });
     },
@@ -152,7 +184,7 @@ export default function CameraScreen() {
     );
   }
 
-  // 3. Camera reported a runtime error
+  // 3a. Camera reported a runtime error
   if (cameraError) {
     return (
       <ErrorScreen
@@ -161,6 +193,28 @@ export default function CameraScreen() {
         hint="Close any other app that might be using the camera, then try again."
         details={`${cameraError.name}: ${cameraError.message}\n\n${cameraError.stack ?? ''}`}
         onRetry={() => setCameraError(null)}
+      />
+    );
+  }
+
+  // 3b. Frame processor blew up. Most often this is a resize/TFLite buffer
+  //     issue specific to a device's camera pixel format.
+  if (frameError) {
+    const m = frameError.message.toLowerCase();
+    const hint = m.includes('arraybuffer')
+      ? 'A buffer-sharing issue with the camera frame processor. This usually clears on retry. If it persists, your device\'s camera may not support the expected pixel format.'
+      : 'The on-device inference pipeline hit an error. Tap Try again to restart it.';
+    return (
+      <ErrorScreen
+        title="Inference error"
+        message={frameError.message}
+        hint={hint}
+        details={frameError.stack ?? ''}
+        onRetry={() => {
+          errorReportedShared.value = false;
+          setFrameError(null);
+          setLoadKey((k) => k + 1);
+        }}
       />
     );
   }
