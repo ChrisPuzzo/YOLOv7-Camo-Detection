@@ -9,7 +9,7 @@
  *
  * Everything runs on-device. No network calls.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -26,11 +26,20 @@ import {
 } from 'react-native-vision-camera';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useSharedValue } from 'react-native-reanimated';
-import { Worklets } from 'react-native-worklets-core';
+import { useRunOnJS } from 'react-native-worklets-core';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
-import { decodeYoloOutput, Detection } from './postprocess';
+import type { Detection } from './postprocess';
 import BoundingBoxOverlay from './BoundingBoxOverlay';
 import ErrorScreen from './ErrorScreen';
+
+// NOTE: postprocess helpers are inlined into this file (and into the
+// frame-processor closure) on purpose. The worklets-core Babel plugin
+// transforms 'worklet'-tagged functions in-place so they can run on the
+// frame processor's separate JS runtime; importing those helpers from
+// another module produced a stale stub at runtime ('undefined is not a
+// function'). Inlining sidesteps that entirely.
+//
+// Type-only imports above keep the public Detection shape in one place.
 
 const CLASS_NAMES = ['camo'];   // Beta = single-class. Pro will reintroduce more.
 const MODEL_INPUT_SIZE = 320;   // must match what was set during export
@@ -55,13 +64,9 @@ export default function CameraScreen() {
   // we bridge through a JS callback. After N consecutive bad frames we
   // surface the ErrorScreen instead of spamming logcat forever.
   const [frameError, setFrameError] = useState<Error | null>(null);
-  const reportFrameErrorJs = useMemo(
-    () =>
-      Worklets.createRunOnJS((msg: string) => {
-        setFrameError(new Error(msg));
-      }),
-    []
-  );
+  const reportFrameErrorJs = useRunOnJS((msg: string) => {
+    setFrameError(new Error(msg));
+  }, []);
 
   // Frame-resize plugin: converts a YUV/RGB Frame into a uint8 RGB tensor
   // sized for the model. Required — passing the raw Frame to TFLite crashes
@@ -81,11 +86,8 @@ export default function CameraScreen() {
   const [detectionsState, setDetectionsState] = useState<Detection[]>([]);
 
   // Bridge worklet -> JS so React can render labels/count.
-  const setDetectionsJs = useMemo(
-    () => Worklets.createRunOnJS(setDetectionsState),
-    []
-  );
-  const setFpsJs = useMemo(() => Worklets.createRunOnJS(setFps), []);
+  const setDetectionsJs = useRunOnJS((d: Detection[]) => setDetectionsState(d), []);
+  const setFpsJs = useRunOnJS((n: number) => setFps(n), []);
 
   useEffect(() => {
     if (!hasPermission) requestPermission();
@@ -128,15 +130,73 @@ export default function CameraScreen() {
             [1, 4 + CLASS_NAMES.length, 0];
 
           // 3. Decode YOLO output into pixel-space Detections.
-          const dets = decodeYoloOutput(raw, shape, {
-            classNames: CLASS_NAMES,
-            confThreshold,
-            iouThreshold: 0.45,
-            modelInputSize: MODEL_INPUT_SIZE,
-            displayWidth: layout.width,
-            displayHeight: layout.height,
-            enabled,
-          });
+          //    Inlined here (rather than imported) so the worklets-core
+          //    Babel plugin transforms it in the same module as the frame
+          //    processor. Cross-module worklet imports were producing
+          //    'undefined is not a function' at runtime.
+          const nc = CLASS_NAMES.length;
+          const stride = 4 + nc;
+          let N: number;
+          let transposed: boolean;
+          if (shape.length === 3 && shape[1] === stride) {
+            N = shape[2]; transposed = true;
+          } else if (shape.length === 3 && shape[2] === stride) {
+            N = shape[1]; transposed = false;
+          } else {
+            N = Math.floor((raw as Float32Array).length / stride); transposed = false;
+          }
+          const sx = layout.width / MODEL_INPUT_SIZE;
+          const sy = layout.height / MODEL_INPUT_SIZE;
+          const cands: Detection[] = [];
+          for (let i = 0; i < N; i++) {
+            const get = (row: number) =>
+              transposed ? (raw as Float32Array)[row * N + i] : (raw as Float32Array)[i * stride + row];
+            const cx = get(0), cy = get(1), w = get(2), h = get(3);
+            let bestClass = 0;
+            let bestScore = -Infinity;
+            for (let c = 0; c < nc; c++) {
+              const s = get(4 + c);
+              if (s > bestScore) { bestScore = s; bestClass = c; }
+            }
+            if (bestScore < confThreshold) continue;
+            const name = CLASS_NAMES[bestClass] ?? String(bestClass);
+            if (enabled && enabled[name] === false) continue;
+            const norm = cx <= 1.5 && cy <= 1.5 && w <= 1.5 && h <= 1.5;
+            const ncx = norm ? cx * MODEL_INPUT_SIZE : cx;
+            const ncy = norm ? cy * MODEL_INPUT_SIZE : cy;
+            const nw = norm ? w * MODEL_INPUT_SIZE : w;
+            const nh = norm ? h * MODEL_INPUT_SIZE : h;
+            cands.push({
+              classId: bestClass,
+              className: name,
+              confidence: bestScore,
+              x: (ncx - nw / 2) * sx,
+              y: (ncy - nh / 2) * sy,
+              w: nw * sx,
+              h: nh * sy,
+            });
+          }
+
+          // Inline NMS (per-class, IoU 0.45). Sort by confidence desc, then
+          // greedily keep boxes that don't heavily overlap a kept higher-conf box.
+          const iouThreshold = 0.45;
+          cands.sort((a, b) => b.confidence - a.confidence);
+          const dets: Detection[] = [];
+          for (const d of cands) {
+            let keep = true;
+            for (const k of dets) {
+              if (k.classId !== d.classId) continue;
+              const x1 = Math.max(k.x, d.x);
+              const y1 = Math.max(k.y, d.y);
+              const x2 = Math.min(k.x + k.w, d.x + d.w);
+              const y2 = Math.min(k.y + k.h, d.y + d.h);
+              const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+              const ua = k.w * k.h + d.w * d.h - inter;
+              const iou = ua > 0 ? inter / ua : 0;
+              if (iou >= iouThreshold) { keep = false; break; }
+            }
+            if (keep) dets.push(d);
+          }
           detectionsShared.value = dets;
           setDetectionsJs(dets);
 
