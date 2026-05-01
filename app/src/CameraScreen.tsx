@@ -29,6 +29,7 @@ import { useSharedValue } from 'react-native-reanimated';
 import { Worklets } from 'react-native-worklets-core';
 import { decodeYoloOutput, Detection } from './postprocess';
 import BoundingBoxOverlay from './BoundingBoxOverlay';
+import ErrorScreen from './ErrorScreen';
 
 const CLASS_NAMES = ['camo'];   // Beta = single-class. Pro will reintroduce more.
 const MODEL_INPUT_SIZE = 320;   // must match what was set during export
@@ -38,10 +39,16 @@ export default function CameraScreen() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
 
+  // Force a remount by bumping `loadKey` — used as the retry mechanism for the
+  // model-load failure screen.
+  const [loadKey, setLoadKey] = useState(0);
   const tfModel = useTensorflowModel(
     require('../assets/models/camo_int8.tflite')
   );
   const model = tfModel.state === 'loaded' ? tfModel.model : undefined;
+
+  // Track camera-level errors (device errors, permission revocation, etc).
+  const [cameraError, setCameraError] = useState<Error | null>(null);
 
   const [confThreshold, setConfThreshold] = useState(0.35);
   const [enabled, setEnabled] = useState<Record<string, boolean>>({ camo: true });
@@ -102,6 +109,7 @@ export default function CameraScreen() {
     [model, confThreshold, enabled, layout]
   );
 
+  // 1. Permission gate
   if (!hasPermission) {
     return (
       <View style={styles.center}>
@@ -112,31 +120,60 @@ export default function CameraScreen() {
       </View>
     );
   }
+
+  // 2. No usable camera (rare — emulator without webcam, or hardware fault)
   if (!device) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.muted}>No camera device found.</Text>
-      </View>
+      <ErrorScreen
+        title="No camera available"
+        message="We couldn't find a back-facing camera on this device."
+        hint="Camo Detector needs a rear camera to scan a scene. If you're on an emulator, try a physical device."
+      />
     );
   }
+
+  // 3. Camera reported a runtime error
+  if (cameraError) {
+    return (
+      <ErrorScreen
+        title="Camera error"
+        message={cameraError.message || 'The camera stopped working.'}
+        hint="Close any other app that might be using the camera, then try again."
+        details={`${cameraError.name}: ${cameraError.message}\n\n${cameraError.stack ?? ''}`}
+        onRetry={() => setCameraError(null)}
+      />
+    );
+  }
+
+  // 4. Model still loading
   if (tfModel.state === 'loading') {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator color="#a3b18a" />
         <Text style={styles.muted}>Loading model…</Text>
       </View>
     );
   }
+
+  // 5. Model load failure — show useful diagnostics + retry
   if (tfModel.state === 'error') {
+    const err = tfModel.error as Error | undefined;
+    const msg = err?.message ?? String(tfModel.error ?? 'Unknown error');
+    const hint = inferLoadHint(msg);
     return (
-      <View style={styles.center}>
-        <Text style={styles.muted}>Failed to load model: {String(tfModel.error)}</Text>
-      </View>
+      <ErrorScreen
+        title="Failed to load model"
+        message="The on-device camo detection model couldn't be initialized."
+        hint={hint}
+        details={`${err?.name ?? 'Error'}: ${msg}\n\n${err?.stack ?? '(no stack)'}`}
+        onRetry={() => setLoadKey((k) => k + 1)}
+      />
     );
   }
 
   return (
     <View
+      key={loadKey}
       style={styles.root}
       onLayout={(e) => setLayout({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
     >
@@ -146,6 +183,7 @@ export default function CameraScreen() {
         isActive
         frameProcessor={frameProcessor}
         pixelFormat="rgb"
+        onError={(e) => setCameraError(e as unknown as Error)}
       />
       <BoundingBoxOverlay detections={detectionsState} />
 
@@ -178,6 +216,27 @@ export default function CameraScreen() {
       </View>
     </View>
   );
+}
+
+/**
+ * Heuristic mapping from a TFLite load-error message to a friendly hint.
+ * Keep this list short and honest — false leads waste a tester's time.
+ */
+function inferLoadHint(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes('not found') || m.includes('no such file') || m.includes('asset')) {
+    return 'The model file is missing from the app bundle. Reinstall the APK — if it persists, the build skipped bundling the .tflite asset.';
+  }
+  if (m.includes('unsupported') && m.includes('op')) {
+    return 'This device\'s TFLite runtime doesn\'t support an operator in the model. Try the latest beta APK, or open an issue with the technical details below.';
+  }
+  if (m.includes('memory') || m.includes('alloc')) {
+    return 'The device may be low on memory. Close other apps and tap Try again.';
+  }
+  if (m.includes('delegate') || m.includes('gpu') || m.includes('nnapi')) {
+    return 'A hardware accelerator failed. The app should fall back to CPU automatically — tap Try again. If it still fails, your device may not support the accelerator.';
+  }
+  return 'Tap Try again. If this keeps happening, file an issue and include the technical details below.';
 }
 
 function Toggle({ label, color, on, onPress }: { label: string; color: string; on: boolean; onPress: () => void }) {
