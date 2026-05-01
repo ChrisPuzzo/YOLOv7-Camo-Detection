@@ -103,33 +103,31 @@ export default function CameraScreen() {
 
           // 1. Resize the incoming Frame into a uint8 RGB tensor of shape
           //    [MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 3]. We use uint8 (not
-          //    float32) for two reasons:
-          //      (a) Our TFLite model is INT8-quantized — uint8 input matches
-          //          the quantization op directly, no scale conversion.
-          //      (b) Float32 output from the resize plugin produces a typed
-          //          array whose ArrayBuffer can get detached before TFLite
-          //          reads it ("no ArrayBuffer attached" worklet crash).
+          //    float32) because our TFLite model is INT8-quantized — uint8
+          //    input matches the quantization op directly, no scale
+          //    conversion needed.
+          //
+          //    NOTE: We pass `resized` directly to model.runSync — matching
+          //    the official react-native-fast-tflite example. The pinned
+          //    versions of vision-camera (4.5.3) + worklets-core (1.5.0) +
+          //    fast-tflite (1.6.1) are the known-working combo for the
+          //    "no ArrayBuffer attached" bug (see GH #2409, #3517). Adding
+          //    a Uint8Array copy here only made things worse on worklet
+          //    threads — leave it out.
           const resized = resize(frame, {
             scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
             pixelFormat: 'rgb',
             dataType: 'uint8',
           });
 
-          // 2. Copy into a fresh, owned Uint8Array so the buffer stays
-          //    attached for the entire model.runSync call. This is the
-          //    canonical workaround for the "no ArrayBuffer attached" bug
-          //    in react-native-fast-tflite + vision-camera v4.
-          const input = new Uint8Array(resized.length);
-          input.set(resized);
-
-          // 3. Run TFLite forward pass.
-          const outputs = model.runSync([input]);
+          // 2. Run TFLite forward pass.
+          const outputs = model.runSync([resized]);
           const raw = outputs[0] as unknown as Float32Array;
           const shape =
             (model.outputs?.[0]?.shape as number[]) ??
             [1, 4 + CLASS_NAMES.length, 0];
 
-          // 4. Decode YOLO output into pixel-space Detections.
+          // 3. Decode YOLO output into pixel-space Detections.
           const dets = decodeYoloOutput(raw, shape, {
             classNames: CLASS_NAMES,
             confThreshold,
