@@ -81,12 +81,14 @@ See [`app/README.md`](app/README.md) for full details.
 ### v1 — Free Beta (current focus)
 - [x] Repo restructure on `feat/yolo26-rebuild`
 - [x] Single-class `camo` setup
-- [ ] Pull pre-labeled datasets (Roboflow camouflaged-soldiers + soldier-civilian-detection)
-- [ ] Train YOLO26n baseline on Colab
-- [ ] Export INT8 TFLite + CoreML
-- [ ] Wire up Expo app with live detection overlay
+- [X] Pull pre-labeled datasets (Roboflow camouflaged-soldiers + soldier-civilian-detection)
+- [X] Train YOLO26n baseline on Colab
+- [X] Export INT8 TFLite + CoreML
+- [X] Wire up Expo app with live detection overlay
 - [ ] Field-test on a real airsoft outing
 - [ ] Free Beta release (TestFlight / Play internal test) — see [`MONETIZATION.md`](MONETIZATION.md)
+
+ Note: I plan on uploading the beta APK here when it is working.
 
 ### v2 — Paid Pro
 - [ ] Hand-label ACD1K (1,000 high-res CC0 images)
