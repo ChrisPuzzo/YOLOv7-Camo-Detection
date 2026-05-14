@@ -1,0 +1,12 @@
+# Ultralytics YOLO dataset config
+# Paths are relative to this file (the repo root).
+
+path: ./dataset
+train: images/train
+val: images/val
+test: images/test  # optional
+
+# Single-class detector: camouflaged person.
+# v2 may reintroduce additional classes (e.g. weapon variants) behind a paid tier.
+names:
+  0: camo

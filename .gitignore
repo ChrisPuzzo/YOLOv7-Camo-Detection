@@ -158,3 +158,40 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# ---- Project-specific ----
+# Dataset (images + labels) — too large for git, host elsewhere
+dataset/images/
+dataset/labels/
+!dataset/images/.gitkeep
+!dataset/labels/.gitkeep
+
+# Training runs & weights
+runs/
+models/*.pt
+models/*.onnx
+models/*.tflite
+models/*.mlpackage/
+models/*_saved_model/
+models/*.engine
+!models/.gitkeep
+
+# Node / Expo
+app/node_modules/
+app/.expo/
+app/dist/
+app/web-build/
+app/ios/
+app/android/
+*.log
+
+# Mobile model bundle (built per-release, don't commit)
+# Bundled model file ships with the app for the Beta APK so users get inference
+# out of the box. To strip a heavier model from git history later, switch to
+# EAS Update or fetch from a GitHub Release on app launch.
+# app/assets/models/*.tflite      # uncomment to keep model out of git
+app/assets/models/*.mlpackage/
+
+# OS junk
+.DS_Store
+Thumbs.db
