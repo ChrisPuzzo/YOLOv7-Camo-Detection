@@ -4,6 +4,8 @@ Real-time, on-device detection of **people wearing camouflage** for airsoft, pai
 
 > Originally built on YOLOv7-tiny / Darknet (legacy weights preserved under [`legacy/`](legacy/)). Rebuilt on **Ultralytics YOLO26-nano** for better mobile performance, NMS-free inference, and clean TFLite/CoreML export.
 
+5/14/26: I want to be transparent and upfront about this repo. Much of the updated code here is written using Vibe coding on Perplexity Computer. I used it to help me design out the app and find training data for me. The model I trained on my own. For the release version of the app, I plan on training on a custom dataset. Right now I'd say the model is reletivly accurate, it can detect camo about as well as the human eye can. I have yet to field test it, when I do I will report the results here (or more likely in a TESTING.md file). I'm making the beta app open-source so feel free to go hog-wild with it.
+
 ## Why one class?
 
 v1 detects only `camo`. We deliberately dropped the `gun`/`weapon` class to:
